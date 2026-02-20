@@ -76,6 +76,13 @@ async def dispatch_to_agent(
                 await on_text(msg.text)
         elif msg.type == "result":
             session_id = msg.session_id
+            # Use ResultMessage.result as fallback when no TextBlock
+            # messages were streamed (can happen during multi-turn tool
+            # use where the final text only appears in the result).
+            if msg.text and not text_parts:
+                text_parts.append(msg.text)
+                if on_text is not None:
+                    await on_text(msg.text)
 
     return DispatchResult(
         full_text="\n".join(text_parts).strip(),

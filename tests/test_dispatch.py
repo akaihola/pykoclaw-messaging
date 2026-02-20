@@ -177,3 +177,87 @@ async def test_dispatch_no_result_message_keeps_resume_session_id(
 
     assert result.full_text == "only text"
     assert result.session_id == "existing"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_result_text_as_fallback(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When no TextBlock messages are streamed, ResultMessage.result text
+    should be used as a fallback so the reply is not lost."""
+    messages = [
+        _make_agent_message("result", session_id="sess-fb", text="<reply>Fallback reply</reply>"),
+    ]
+
+    async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
+        for m in messages:
+            yield m
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="fb1",
+            db=tmp_db,
+            data_dir=tmp_path,
+        )
+
+    assert "<reply>Fallback reply</reply>" in result.full_text
+    assert result.session_id == "sess-fb"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_does_not_duplicate_when_streamed_and_result(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When TextBlock messages ARE streamed, ResultMessage.result should NOT
+    cause duplication."""
+    messages = [
+        _make_agent_message("text", text="<reply>Streamed</reply>"),
+        _make_agent_message("result", session_id="sess-dup", text="<reply>Streamed</reply>"),
+    ]
+
+    async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
+        for m in messages:
+            yield m
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="dup1",
+            db=tmp_db,
+            data_dir=tmp_path,
+        )
+
+    assert result.full_text == "<reply>Streamed</reply>"
+    assert result.session_id == "sess-dup"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_result_text_callback_on_text(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When fallback result text is used, on_text callback should be invoked."""
+    messages = [
+        _make_agent_message("result", session_id="sess-cb", text="<reply>CB</reply>"),
+    ]
+
+    async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
+        for m in messages:
+            yield m
+
+    on_text = AsyncMock()
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="cb1",
+            db=tmp_db,
+            data_dir=tmp_path,
+            on_text=on_text,
+        )
+
+    assert result.full_text == "<reply>CB</reply>"
+    on_text.assert_awaited_once_with("<reply>CB</reply>")
