@@ -99,6 +99,7 @@ class MessagingPlugin(PykoClawPluginBase):
                     db=db,
                     data_dir=settings.data,
                     model=model,
+                    fresh=True,
                 )
             )
 

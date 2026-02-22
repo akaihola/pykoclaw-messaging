@@ -123,6 +123,7 @@ def test_send_dispatches_and_enqueues(tmp_path: Path) -> None:
     assert kw["prompt"] == "What is 2+2?"
     assert kw["channel_prefix"] == "matrix"
     assert kw["channel_id"] == "!room:server"
+    assert kw["fresh"] is True, "send must always start a fresh session"
 
     # Verify enqueue was called
     mock_enqueue.assert_called_once()

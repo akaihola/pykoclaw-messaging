@@ -28,6 +28,7 @@ async def dispatch_to_agent(
     extra_mcp_servers: dict[str, Any] | None = None,
     model: str | None = None,
     on_text: Callable[[str], Awaitable[None]] | None = None,
+    fresh: bool = False,
 ) -> DispatchResult:
     """Send *prompt* to the agent on behalf of a channel conversation.
 
@@ -47,6 +48,9 @@ async def dispatch_to_agent(
         on_text: Async callback invoked for every text chunk as it streams
             from the agent.  Use this for real-time delivery (e.g. ACP
             ``session/update`` notifications, Telegram ``send_message``).
+        fresh: If ``True``, start a new session instead of resuming an
+            existing one.  The conversation name is still used for the
+            working directory and DB lookup, but the session is not resumed.
 
     Returns:
         A :class:`DispatchResult` with the concatenated response text and
@@ -54,8 +58,11 @@ async def dispatch_to_agent(
     """
     conversation_name = f"{channel_prefix}-{channel_id}"
 
-    conv = get_conversation(db, conversation_name)
-    resume_session_id = conv.session_id if conv and conv.session_id else None
+    if fresh:
+        resume_session_id = None
+    else:
+        conv = get_conversation(db, conversation_name)
+        resume_session_id = conv.session_id if conv and conv.session_id else None
 
     text_parts: list[str] = []
     session_id: str | None = resume_session_id

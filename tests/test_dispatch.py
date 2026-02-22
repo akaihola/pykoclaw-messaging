@@ -298,3 +298,36 @@ async def test_dispatch_result_text_callback_on_text(
 
     assert result.full_text == "<reply>CB</reply>"
     on_text.assert_awaited_once_with("<reply>CB</reply>")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_fresh_skips_session_resume(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When fresh=True, the existing session_id must NOT be used for resume,
+    even if one exists in the database."""
+    tmp_db.execute(
+        "INSERT INTO conversations (name, session_id, cwd, created_at)"
+        " VALUES (?, ?, ?, ?)",
+        ("matrix-!room:fresh", "old-sess-123", "/tmp", "2025-01-01T00:00:00"),
+    )
+    tmp_db.commit()
+
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        captured_kwargs.update(kwargs)
+        yield _make_agent_message("result", session_id="new-fresh-sess")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="matrix",
+            channel_id="!room:fresh",
+            db=tmp_db,
+            data_dir=tmp_path,
+            fresh=True,
+        )
+
+    assert captured_kwargs["resume_session_id"] is None
+    assert result.session_id == "new-fresh-sess"
