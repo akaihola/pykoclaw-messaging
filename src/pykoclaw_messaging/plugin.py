@@ -91,6 +91,13 @@ class MessagingPlugin(PykoClawPluginBase):
                 err=True,
             )
 
+            system_prompt = dedent("""\
+                You are a helpful assistant. Your entire response will be \
+                delivered as a message to a chat conversation. Write your \
+                reply as if you are speaking directly to the recipient. \
+                Do not include meta-commentary about sending or delivering \
+                the message — just respond with the content itself.""")
+
             result = asyncio.run(
                 dispatch_to_agent(
                     prompt=prompt,
@@ -100,6 +107,7 @@ class MessagingPlugin(PykoClawPluginBase):
                     data_dir=settings.data,
                     model=model,
                     fresh=True,
+                    system_prompt=system_prompt,
                 )
             )
 
