@@ -55,7 +55,7 @@ async def dispatch_to_agent(
     conversation_name = f"{channel_prefix}-{channel_id}"
 
     conv = get_conversation(db, conversation_name)
-    resume_session_id = conv.session_id if conv else None
+    resume_session_id = conv.session_id if conv and conv.session_id else None
 
     text_parts: list[str] = []
     session_id: str | None = resume_session_id

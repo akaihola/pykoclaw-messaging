@@ -186,7 +186,9 @@ async def test_dispatch_uses_result_text_as_fallback(
     """When no TextBlock messages are streamed, ResultMessage.result text
     should be used as a fallback so the reply is not lost."""
     messages = [
-        _make_agent_message("result", session_id="sess-fb", text="<reply>Fallback reply</reply>"),
+        _make_agent_message(
+            "result", session_id="sess-fb", text="<reply>Fallback reply</reply>"
+        ),
     ]
 
     async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
@@ -214,7 +216,9 @@ async def test_dispatch_does_not_duplicate_when_streamed_and_result(
     cause duplication."""
     messages = [
         _make_agent_message("text", text="<reply>Streamed</reply>"),
-        _make_agent_message("result", session_id="sess-dup", text="<reply>Streamed</reply>"),
+        _make_agent_message(
+            "result", session_id="sess-dup", text="<reply>Streamed</reply>"
+        ),
     ]
 
     async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
@@ -232,6 +236,39 @@ async def test_dispatch_does_not_duplicate_when_streamed_and_result(
 
     assert result.full_text == "<reply>Streamed</reply>"
     assert result.session_id == "sess-dup"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_empty_session_id_treated_as_none(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """An empty-string session_id (left after a failed resume retry) must be
+    treated as None so the SDK starts a fresh session instead of trying to
+    resume with an invalid empty string."""
+    tmp_db.execute(
+        "INSERT INTO conversations (name, session_id, cwd, created_at)"
+        " VALUES (?, ?, ?, ?)",
+        ("matrix-!room:test", "", "/tmp", "2025-01-01T00:00:00"),
+    )
+    tmp_db.commit()
+
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        captured_kwargs.update(kwargs)
+        yield _make_agent_message("result", session_id="fresh-sess")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="matrix",
+            channel_id="!room:test",
+            db=tmp_db,
+            data_dir=tmp_path,
+        )
+
+    assert captured_kwargs["resume_session_id"] is None
+    assert result.session_id == "fresh-sess"
 
 
 @pytest.mark.asyncio
