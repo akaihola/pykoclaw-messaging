@@ -21,7 +21,7 @@ from typing import Any
 
 from claude_agent_sdk import ProcessError
 
-from pykoclaw.agent_core import _prompt_hash, query_agent
+from pykoclaw.agent_core import prompt_hash, query_agent
 from pykoclaw.db import DbConnection, get_conversation, upsert_conversation
 
 log = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ async def dispatch_to_agent(
 
         # Invalidate session if system prompt changed since creation.
         if resume_session_id and conv and system_prompt:
-            current_hash = _prompt_hash(system_prompt)
+            current_hash = prompt_hash(system_prompt)
             if conv.system_prompt_hash and conv.system_prompt_hash != current_hash:
                 log.info(
                     "System prompt changed for %s — starting fresh session",
@@ -157,5 +157,5 @@ async def dispatch_to_agent(
             resume_session_id,
         )
         # Clear the stale session so future calls don't hit the same error.
-        upsert_conversation(db, conversation_name, "", str(data_dir))
+        upsert_conversation(db, conversation_name, None, str(data_dir))
         return await _run_agent(prompt, resume_session_id=None, **common)

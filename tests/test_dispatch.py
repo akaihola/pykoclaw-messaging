@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from claude_agent_sdk import ProcessError
 
 from pykoclaw_messaging.dispatch import DispatchResult, dispatch_to_agent
 
@@ -21,7 +22,8 @@ def tmp_db(tmp_path: Path) -> sqlite3.Connection:
         "    name TEXT PRIMARY KEY,"
         "    session_id TEXT,"
         "    cwd TEXT,"
-        "    created_at TEXT NOT NULL"
+        "    created_at TEXT NOT NULL,"
+        "    system_prompt_hash TEXT"
         ");"
     )
     return db
@@ -331,3 +333,143 @@ async def test_dispatch_fresh_skips_session_resume(
 
     assert captured_kwargs["resume_session_id"] is None
     assert result.session_id == "new-fresh-sess"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_retries_on_process_error(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When session resume raises ProcessError, dispatch should clear the
+    session and retry fresh.  The second call must succeed."""
+    tmp_db.execute(
+        "INSERT INTO conversations (name, session_id, cwd, created_at)"
+        " VALUES (?, ?, ?, ?)",
+        ("wa-retry1", "stale-sess", "/tmp", "2025-01-01T00:00:00"),
+    )
+    tmp_db.commit()
+
+    call_count = 0
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        nonlocal call_count
+        call_count += 1
+        if kwargs.get("resume_session_id") == "stale-sess":
+            raise ProcessError("CLI crash", exit_code=1)
+        yield _make_agent_message("text", text="retried ok")
+        yield _make_agent_message("result", session_id="fresh-sess")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="retry1",
+            db=tmp_db,
+            data_dir=tmp_path,
+        )
+
+    assert call_count == 2
+    assert result.full_text == "retried ok"
+    assert result.session_id == "fresh-sess"
+
+    # Session should be cleared in DB
+    row = tmp_db.execute(
+        "SELECT session_id FROM conversations WHERE name = ?", ("wa-retry1",)
+    ).fetchone()
+    assert row["session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_process_error_no_retry_when_fresh(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When there's no session to resume, ProcessError should propagate
+    (no retry possible)."""
+
+    async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
+        raise ProcessError("CLI crash", exit_code=1)
+        yield  # make it a generator  # noqa: RET503
+
+    with (
+        patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent),
+        pytest.raises(ProcessError),
+    ):
+        await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="noresume",
+            db=tmp_db,
+            data_dir=tmp_path,
+        )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_stale_prompt_hash_starts_fresh(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When the stored system_prompt_hash differs from the current prompt,
+    dispatch should skip session resume and start fresh."""
+    tmp_db.execute(
+        "INSERT INTO conversations"
+        " (name, session_id, cwd, created_at, system_prompt_hash)"
+        " VALUES (?, ?, ?, ?, ?)",
+        ("wa-hash1", "old-sess", "/tmp", "2025-01-01T00:00:00", "oldhashabcdef01"),
+    )
+    tmp_db.commit()
+
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        captured_kwargs.update(kwargs)
+        yield _make_agent_message("result", session_id="new-sess")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="hash1",
+            db=tmp_db,
+            data_dir=tmp_path,
+            system_prompt="a totally different system prompt",
+        )
+
+    # Session should NOT be resumed because the hash changed
+    assert captured_kwargs["resume_session_id"] is None
+    assert result.session_id == "new-sess"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_matching_prompt_hash_resumes(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When the stored hash matches the current prompt, session resumes normally."""
+    from pykoclaw.agent_core import prompt_hash
+
+    system_prompt = "be helpful and kind"
+    sp_hash = prompt_hash(system_prompt)
+
+    tmp_db.execute(
+        "INSERT INTO conversations"
+        " (name, session_id, cwd, created_at, system_prompt_hash)"
+        " VALUES (?, ?, ?, ?, ?)",
+        ("wa-hash2", "good-sess", "/tmp", "2025-01-01T00:00:00", sp_hash),
+    )
+    tmp_db.commit()
+
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        captured_kwargs.update(kwargs)
+        yield _make_agent_message("result", session_id="good-sess")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="hash2",
+            db=tmp_db,
+            data_dir=tmp_path,
+            system_prompt=system_prompt,
+        )
+
+    # Session SHOULD be resumed because the hash matches
+    assert captured_kwargs["resume_session_id"] == "good-sess"
