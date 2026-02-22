@@ -122,6 +122,7 @@ async def dispatch_to_agent(
 
     if fresh:
         resume_session_id = None
+        log.debug("dispatch %s: fresh=True, starting new session", conversation_name)
     else:
         conv = get_conversation(db, conversation_name)
         resume_session_id = conv.session_id if conv and conv.session_id else None
@@ -129,12 +130,25 @@ async def dispatch_to_agent(
         # Invalidate session if system prompt changed since creation.
         if resume_session_id and conv and system_prompt:
             current_hash = prompt_hash(system_prompt)
-            if conv.system_prompt_hash and conv.system_prompt_hash != current_hash:
+            stored_hash = conv.system_prompt_hash
+            log.debug(
+                "dispatch %s: stored_hash=%s current_hash=%s",
+                conversation_name,
+                stored_hash,
+                current_hash,
+            )
+            if stored_hash and stored_hash != current_hash:
                 log.info(
                     "System prompt changed for %s — starting fresh session",
                     conversation_name,
                 )
                 resume_session_id = None
+        else:
+            log.debug(
+                "dispatch %s: resume_session_id=%s (no hash check needed)",
+                conversation_name,
+                resume_session_id,
+            )
 
     common = dict(
         db=db,
