@@ -3,10 +3,13 @@ name = "pykoclaw-messaging"
 version = "0.1.0"
 description = "Shared messaging dispatch for pykoclaw channel plugins"
 requires-python = ">=3.12"
-dependencies = ["pykoclaw"]
+dependencies = ["pykoclaw", "click"]
 
 [tool.uv.sources]
 pykoclaw = { workspace = true }
+
+[project.entry-points."pykoclaw.plugins"]
+messaging = "pykoclaw_messaging:MessagingPlugin"
 
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio"]
