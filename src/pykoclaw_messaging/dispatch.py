@@ -74,7 +74,7 @@ async def _run_agent(
                     await on_text(msg.text)
 
     return DispatchResult(
-        full_text="\n".join(text_parts).strip(),
+        full_text="".join(text_parts).strip(),
         session_id=session_id,
     )
 
