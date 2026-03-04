@@ -44,6 +44,7 @@ async def _run_agent(
     extra_mcp_servers: dict[str, Any] | None,
     model: str | None,
     on_text: Callable[[str], Awaitable[None]] | None,
+    include_partial_messages: bool,
 ) -> DispatchResult:
     """Single attempt at running the agent.  Extracted so retry can re-call."""
     text_parts: list[str] = []
@@ -58,6 +59,7 @@ async def _run_agent(
         resume_session_id=resume_session_id,
         extra_mcp_servers=extra_mcp_servers,
         model=model,
+        include_partial_messages=include_partial_messages,
     ):
         if msg.type == "text" and msg.text:
             text_parts.append(msg.text)
@@ -91,6 +93,7 @@ async def dispatch_to_agent(
     model: str | None = None,
     on_text: Callable[[str], Awaitable[None]] | None = None,
     fresh: bool = False,
+    include_partial_messages: bool = True,
 ) -> DispatchResult:
     """Send *prompt* to the agent on behalf of a channel conversation.
 
@@ -158,6 +161,7 @@ async def dispatch_to_agent(
         extra_mcp_servers=extra_mcp_servers,
         model=model,
         on_text=on_text,
+        include_partial_messages=include_partial_messages,
     )
 
     try:
