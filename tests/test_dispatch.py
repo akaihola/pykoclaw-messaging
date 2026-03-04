@@ -61,7 +61,7 @@ async def test_dispatch_returns_concatenated_text(
         )
 
     assert isinstance(result, DispatchResult)
-    assert result.full_text == "Hello\nWorld"
+    assert result.full_text == "HelloWorld"
     assert result.session_id == "sess-1"
 
 
@@ -94,7 +94,7 @@ async def test_dispatch_calls_on_text_for_each_chunk(
     assert on_text.await_count == 2
     on_text.assert_any_await("chunk-a")
     on_text.assert_any_await("chunk-b")
-    assert result.full_text == "chunk-a\nchunk-b"
+    assert result.full_text == "chunk-achunk-b"
 
 
 @pytest.mark.asyncio
@@ -473,3 +473,50 @@ async def test_dispatch_matching_prompt_hash_resumes(
 
     # Session SHOULD be resumed because the hash matches
     assert captured_kwargs["resume_session_id"] == "good-sess"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_include_partial_messages_forwarded(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """include_partial_messages is forwarded to query_agent unchanged."""
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        captured_kwargs.update(kwargs)
+        yield _make_agent_message("result", session_id="s1")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="test",
+            channel_id="1",
+            db=tmp_db,
+            data_dir=tmp_path,
+            include_partial_messages=False,
+        )
+
+    assert captured_kwargs["include_partial_messages"] is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_include_partial_messages_default_true(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """include_partial_messages defaults to True so streaming callers (ACP) are unaffected."""
+    captured_kwargs: dict[str, Any] = {}
+
+    async def fake_query_agent(*_args: Any, **kwargs: Any):  # noqa: ANN202
+        captured_kwargs.update(kwargs)
+        yield _make_agent_message("result", session_id="s2")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="test",
+            channel_id="2",
+            db=tmp_db,
+            data_dir=tmp_path,
+        )
+
+    assert captured_kwargs["include_partial_messages"] is True
