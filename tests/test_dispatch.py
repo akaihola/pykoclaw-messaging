@@ -32,9 +32,15 @@ def tmp_db(tmp_path: Path) -> sqlite3.Connection:
 def _make_agent_message(
     msg_type: str, text: str | None = None, session_id: str | None = None
 ) -> Any:
+    from typing import cast
+
     from pykoclaw.agent_core import AgentMessage
 
-    return AgentMessage(type=msg_type, text=text, session_id=session_id)
+    return AgentMessage(
+        type=cast("Any", msg_type),
+        text=text,
+        session_id=session_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -473,6 +479,28 @@ async def test_dispatch_matching_prompt_hash_resumes(
 
     # Session SHOULD be resumed because the hash matches
     assert captured_kwargs["resume_session_id"] == "good-sess"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_response_transformer_applied(
+    tmp_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    async def fake_query_agent(*_args: Any, **_kwargs: Any):  # noqa: ANN202
+        yield _make_agent_message("text", text="hello")
+        yield _make_agent_message("result", session_id="sess-transform")
+
+    with patch("pykoclaw_messaging.dispatch.query_agent", fake_query_agent):
+        result = await dispatch_to_agent(
+            prompt="hi",
+            channel_prefix="wa",
+            channel_id="transform",
+            db=tmp_db,
+            data_dir=tmp_path,
+            response_transformer=str.upper,
+        )
+
+    assert result.full_text == "HELLO"
+    assert result.session_id == "sess-transform"
 
 
 @pytest.mark.asyncio

@@ -45,6 +45,7 @@ async def _run_agent(
     model: str | None,
     on_text: Callable[[str], Awaitable[None]] | None,
     include_partial_messages: bool,
+    response_transformer: Callable[[str], str] | None,
 ) -> DispatchResult:
     """Single attempt at running the agent.  Extracted so retry can re-call."""
     text_parts: list[str] = []
@@ -75,8 +76,12 @@ async def _run_agent(
                 if on_text is not None:
                     await on_text(msg.text)
 
+    full_text = "".join(text_parts).strip()
+    if response_transformer is not None:
+        full_text = response_transformer(full_text)
+
     return DispatchResult(
-        full_text="".join(text_parts).strip(),
+        full_text=full_text,
         session_id=session_id,
     )
 
@@ -94,6 +99,7 @@ async def dispatch_to_agent(
     on_text: Callable[[str], Awaitable[None]] | None = None,
     fresh: bool = False,
     include_partial_messages: bool = True,
+    response_transformer: Callable[[str], str] | None = None,
 ) -> DispatchResult:
     """Send *prompt* to the agent on behalf of a channel conversation.
 
@@ -153,19 +159,20 @@ async def dispatch_to_agent(
                 resume_session_id,
             )
 
-    common = dict(
-        db=db,
-        data_dir=data_dir,
-        conversation_name=conversation_name,
-        system_prompt=system_prompt,
-        extra_mcp_servers=extra_mcp_servers,
-        model=model,
-        on_text=on_text,
-        include_partial_messages=include_partial_messages,
-    )
-
     try:
-        return await _run_agent(prompt, resume_session_id=resume_session_id, **common)
+        return await _run_agent(
+            prompt,
+            db=db,
+            data_dir=data_dir,
+            conversation_name=conversation_name,
+            system_prompt=system_prompt,
+            resume_session_id=resume_session_id,
+            extra_mcp_servers=extra_mcp_servers,
+            model=model,
+            on_text=on_text,
+            include_partial_messages=include_partial_messages,
+            response_transformer=response_transformer,
+        )
     except ProcessError:
         if resume_session_id is None:
             raise  # already fresh — nothing to retry
@@ -176,4 +183,16 @@ async def dispatch_to_agent(
         )
         # Clear the stale session so future calls don't hit the same error.
         upsert_conversation(db, conversation_name, None, str(data_dir))
-        return await _run_agent(prompt, resume_session_id=None, **common)
+        return await _run_agent(
+            prompt,
+            db=db,
+            data_dir=data_dir,
+            conversation_name=conversation_name,
+            system_prompt=system_prompt,
+            resume_session_id=None,
+            extra_mcp_servers=extra_mcp_servers,
+            model=model,
+            on_text=on_text,
+            include_partial_messages=include_partial_messages,
+            response_transformer=response_transformer,
+        )
